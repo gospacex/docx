@@ -1,6 +1,6 @@
 module github.com/gospacex/hubx/cache/mongo
 
-go 1.26.2
+go 1.19
 
 require (
 	github.com/gospacex/hubx/cache/docx v0.0.0-00010101000000-000000000000
@@ -10,7 +10,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-replace github.com/gospacex/hubx/cache/docx => ..
+replace github.com/gospacex/hubx/cache/docx => ./..
 
 require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect

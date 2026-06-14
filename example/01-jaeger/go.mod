@@ -1,6 +1,6 @@
 module github.com/gospacex/hubx/cache/example/couchbase_test
 
-go 1.26.2
+go 1.19
 
 replace github.com/gospacex/hubx/cache/docx => ../..
 
