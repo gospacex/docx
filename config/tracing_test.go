@@ -43,6 +43,20 @@ func TestTracingConfig_Validate_UnknownExporter(t *testing.T) {
 	}
 }
 
+func TestTracingConfig_Validate_UnknownSamplerType(t *testing.T) {
+	cfg := TracingConfig{
+		Enabled:     true,
+		ServiceName: "svc",
+		Exporter:    "jaeger",
+		Endpoint:    "localhost:4317",
+		SamplerType: "mystery",
+	}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "unsupported sampler_type") {
+		t.Fatalf("expected sampler_type error, got: %v", err)
+	}
+}
+
 func TestTracingConfig_Validate_JaegerRequiresEndpoint(t *testing.T) {
 	cfg := TracingConfig{Enabled: true, ServiceName: "svc", Exporter: "jaeger"}
 	err := cfg.Validate()

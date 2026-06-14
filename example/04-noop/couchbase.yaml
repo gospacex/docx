@@ -6,4 +6,4 @@ password: password
 connect_timeout_ms: 10000
 socket_timeout_ms: 5000
 tracing:
-  enabled: false   # Noop: InitTracing is called manually with WithNoop().
+  enabled: false   # Noop provider is installed manually via InitTracing(..., WithNoop()).

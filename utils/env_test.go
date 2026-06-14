@@ -35,6 +35,17 @@ func TestExpandEnvVars_MissingNoDefaultErrors(t *testing.T) {
 	}
 }
 
+func TestExpandEnvVars_ExplicitEmptyDefault(t *testing.T) {
+	os.Unsetenv("EMPTY_OK")
+	got, err := ExpandEnvVars("x=${env:EMPTY_OK:-}")
+	if err != nil {
+		t.Fatalf("expected explicit empty default to suppress error, got: %v", err)
+	}
+	if got != "x=" {
+		t.Fatalf("expected empty default, got %q", got)
+	}
+}
+
 func TestExpandEnvVars_NoMarkers(t *testing.T) {
 	got, err := ExpandEnvVars("plain text")
 	if err != nil {

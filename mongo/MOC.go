@@ -3,37 +3,27 @@ package mongo
 import (
 	"context"
 	"fmt"
-
-	"github.com/gospacex/hubx/cache/docx/observability"
 )
 
 func MOC(ctx context.Context, cfg *Config) (*Client, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("mongo: config is nil")
-	}
-	if cfg.URI == "" {
-		return nil, fmt.Errorf("mongo: URI is required")
+	if err := cfg.ValidateClient(); err != nil {
+		return nil, err
 	}
 
-	key := cfg.ContentHash()
-	if key == "" {
-		key = cfg.URI
+	key, err := clientConfigKey(cfg)
+	if err != nil {
+		return nil, err
 	}
 
-	val, err := getOrCreate(key, func() (interface{}, error) {
-		return newClientWithTracing(ctx, cfg)
+	val, err := getOrCreate(ctx, key, kindClient, func(ctx context.Context) (any, error) {
+		return newClient(ctx, cfg, key)
 	})
 	if err != nil {
 		return nil, err
 	}
-	return val.(*Client), nil
-}
-
-func newClientWithTracing(ctx context.Context, cfg *Config) (*Client, error) {
-	if cfg.Tracing.Enabled {
-		if err := observability.InitTracing(ctx, cfg.Tracing); err != nil {
-			return nil, fmt.Errorf("mongo: %w", err)
-		}
+	client, ok := val.(*Client)
+	if !ok {
+		return nil, fmt.Errorf("mongo: cache value for %q is %T, want *Client", key, val)
 	}
-	return newClient(ctx, cfg)
+	return client, nil
 }

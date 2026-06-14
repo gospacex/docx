@@ -6,7 +6,7 @@
 
 **docx** 是一个 Go 库，为 Couchbase 和 MongoDB 提供统一的、约定优于配置的抽象层，并附带基于 OpenTelemetry 的可插拔分布式追踪能力。
 
-它在底层数据库驱动之上封装了连接单例缓存、自动初始化追踪、YAML 驱动配置以及自包含的 Span 导出器——让你的业务代码只需对接这一个库，而无需同时处理三个 SDK。
+它在底层数据库驱动之上封装了连接单例缓存、显式 OpenTelemetry 追踪初始化、YAML 驱动配置以及自包含的 Span 导出器——让你的业务代码只需对接这一个库，而无需同时处理三个 SDK。
 
 ---
 
@@ -17,7 +17,7 @@ docx 是一个**多模块单体仓库**，包含三个 Go 模块：
 ```
 docx/                         # github.com/gospacex/hubx/cache/docx
 ├── config/                   # TracingConfig, CouchbaseConfig, MongoConfig
-├── observability/            # InitTracing, StartSpan, 链路传播
+├── observability/            # InitTracing, ShutdownTracing, StartSpan, 链路传播
 │   └── tracing/              # SpanExporter: Jaeger / Kafka Topic / Redis Stream
 ├── utils/                    # 配置指纹、环境变量展开
 ├── test/                     # 共享测试辅助
@@ -35,8 +35,8 @@ docx/                         # github.com/gospacex/hubx/cache/docx
 
 ## 特性
 
-- **连接单例缓存** — 基于 `sync.Map` + `sync.Mutex` 的 `getOrCreate`，带 30s 错误冷却；相同配置重复打开复用已有连接。
-- **分布式追踪** — 每个数据库操作可自动生成 OpenTelemetry Span。
+- **连接单例缓存** — 基于 `sync.Map` + `LoadOrStore` 的 `getOrCreate`，带 30s 错误冷却；相同配置重复打开复用已有连接。
+- **分布式追踪** — 应用显式初始化 tracing 后，带 Trace 的辅助方法会生成 OpenTelemetry Span。
 - **三种 Span 导出模式**（自包含，无需外部依赖注入）：
   - **Jaeger** — 通过 OTLP gRPC 或 HTTP 发送至 Jaeger Collector。
   - **Kafka Topic** — 将 Span 序列化为 JSON 发送至 Kafka Topic（基于 `confluent-kafka-go/v2`）。
@@ -87,22 +87,46 @@ func main() {
     }
     defer bucket.Close()
 
-    _ = bucket.Upsert(ctx, "my-key", map[string]string{"hello": "world"})
+    if _, err := bucket.Upsert("my-key", map[string]string{"hello": "world"}); err != nil {
+        log.Fatal(err)
+    }
 }
 ```
 
 ```yaml
 # couchbase.yaml
-address: localhost
+endpoints:
+  - localhost:8091
+bucket: my-bucket
 username: admin
 password: pass
-bucket_name: my-bucket
-tracing:
-  enabled: true
-  service_name: my-service
-  exporter: jaeger
-  endpoint: localhost:4317
 ```
+
+### 显式启用 tracing
+
+`COS` / `COC` / `MOS` / `MOC` 不再隐式安装全局 TracerProvider。
+如果你要使用 `GetTrace`、`InsertTrace`、`FindTrace` 这类带追踪的
+辅助方法，请在应用启动时显式初始化 tracing，并在退出时关闭：
+
+```go
+raw, err := os.ReadFile("couchbase.yaml")
+if err != nil {
+    log.Fatal(err)
+}
+cfg, err := couchbase.ParseConfig(raw)
+if err != nil {
+    log.Fatal(err)
+}
+if err := observability.InitTracing(ctx, cfg.Tracing); err != nil {
+    log.Fatal(err)
+}
+defer observability.ShutdownTracing(ctx)
+
+bucket, err := couchbase.COS(ctx, cfg)
+```
+
+YAML 中的 `tracing:` 配置仍然是 exporter、采样和认证参数的权威
+来源；只是现在改为由应用显式消费。
 
 ---
 
@@ -146,10 +170,11 @@ tracing:
 
 ```yaml
 # Couchbase
-address: localhost
+endpoints:
+  - localhost:8091
 username: admin
 password: ${env:CB_PASS}
-bucket_name: my-bucket
+bucket: my-bucket
 tracing: { ... }
 ```
 
@@ -172,7 +197,7 @@ tracing: { ... }
 | 包 | 核心函数 / 类型 |
 |---|---|
 | `config` | `TracingConfig`、`CouchbaseConfig`、`MongoConfig`；`Validate()` |
-| `observability` | `InitTracing(ctx, cfg)`、`StartSpan(ctx, name)`、`SetBaggage`、`GetBaggage`、`InjectTrace`、`ExtractTrace` |
+| `observability` | `InitTracing(ctx, cfg)`、`ShutdownTracing(ctx)`、`StartSpan(ctx, name)`、`SetBaggage`、`GetBaggage`、`InjectTrace`、`ExtractTrace` |
 | `observability/tracing` | `NewExporter(cfg)` — 工厂函数，返回 `sdktrace.SpanExporter` |
 | `utils` | `Fingerprint(cfg)`、`ExpandEnvVars(s)` |
 
@@ -185,7 +210,7 @@ tracing: { ... }
 | `CPS(ctx, path)` | Couchbase **P**arse-and-Connect **S**tandard — YAML → `*Bucket` |
 | `CPC(ctx, path)` | Couchbase **P**arse-and-Connect **C**luster — YAML → `*Cluster` |
 
-**Bucket 方法**: `Get`、`Insert`、`Upsert`、`Remove`、`Ping`、`HealthCheck`
+**Bucket 方法**: `Get`、`Insert`、`Upsert`、`Remove`、`Ping`、`HealthCheck`、`Close()`
 
 **追踪包装**: `GetTrace`、`InsertTrace`、`UpdateTrace`、`DeleteTrace` — 同名语义，自动生成 Span。
 
@@ -198,7 +223,7 @@ tracing: { ... }
 | `MPC(ctx, path)` | Mongo **P**arse-and-Connect **C**lient — YAML → `*Client` |
 | `MPS(ctx, path)` | Mongo **P**arse-and-Connect **S**tandard — YAML → `*Collection` |
 
-**Collection 方法**: `Find`、`FindOne`、`InsertOne`、`UpdateOne`、`DeleteOne`、`HealthCheck`
+**Collection 方法**: `Find`、`FindOne`、`InsertOne`、`UpdateOne`、`DeleteOne`、`HealthCheck`、`Close(ctx)`
 
 **追踪包装**: `FindTrace`、`FindOneTrace`、`InsertTrace`、`UpdateTrace`、`DeleteTrace`
 

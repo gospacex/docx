@@ -5,62 +5,77 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gospacex/hubx/cache/docx/observability"
-	"go.mongodb.org/mongo-driver/mongo"
+	gomongo "go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func MOS(ctx context.Context, cfg *Config) (*Collection, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("mongo: config is nil")
-	}
-	if cfg.URI == "" {
-		return nil, fmt.Errorf("mongo: URI is required")
+	if err := cfg.ValidateCollection(); err != nil {
+		return nil, err
 	}
 
-	key := cfg.ContentHash()
-	if key == "" {
-		key = cfg.URI
+	collectionKey, err := collectionConfigKey(cfg)
+	if err != nil {
+		return nil, err
+	}
+	clientKey, err := clientConfigKey(cfg)
+	if err != nil {
+		return nil, err
 	}
 
-	val, err := getOrCreate(key, func() (interface{}, error) {
-		return newCollection(ctx, cfg)
+	val, err := getOrCreate(ctx, collectionKey, kindCollection, func(ctx context.Context) (any, error) {
+		return newCollection(ctx, cfg, collectionKey, clientKey)
 	})
 	if err != nil {
 		return nil, err
 	}
-	return val.(*Collection), nil
+	coll, ok := val.(*Collection)
+	if !ok {
+		return nil, fmt.Errorf("mongo: cache value for %q is %T, want *Collection", collectionKey, val)
+	}
+	return coll, nil
 }
 
-func newCollection(ctx context.Context, cfg *Config) (*Collection, error) {
-	cl, err := newClient(ctx, cfg)
+func newCollection(ctx context.Context, cfg *Config, collectionKey, clientKey string) (*Collection, error) {
+	cl, err := getOrCreateClient(ctx, cfg, clientKey)
 	if err != nil {
 		return nil, err
 	}
 
-	if cfg.Tracing.Enabled {
-		if err := observability.InitTracing(ctx, cfg.Tracing); err != nil {
-			return nil, fmt.Errorf("mongo: %w", err)
-		}
-	}
-
-	dbName := cfg.Database
-	if dbName == "" {
-		dbName = "default"
-	}
-
-	db := cl.client.Database(dbName)
-
-	collName := ""
-	// If the URI has a collection path, use the default collection
 	return &Collection{
-		Name:   collName,
-		client: cl,
-		coll:   db.Collection(collName),
+		Name:     cfg.Collection,
+		client:   cl,
+		coll:     cl.client.Database(cfg.Database).Collection(cfg.Collection),
+		cacheKey: collectionKey,
 	}, nil
 }
 
-func newClient(ctx context.Context, cfg *Config) (*Client, error) {
+func openClient(ctx context.Context, cfg *Config) (*Client, error) {
+	if err := cfg.ValidateClient(); err != nil {
+		return nil, err
+	}
+	key, err := clientConfigKey(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return getOrCreateClient(ctx, cfg, key)
+}
+
+func getOrCreateClient(ctx context.Context, cfg *Config, key string) (*Client, error) {
+	val, err := getOrCreate(ctx, key, kindClient, func(ctx context.Context) (any, error) {
+		return newClient(ctx, cfg, key)
+	})
+	if err != nil {
+		return nil, err
+	}
+	client, ok := val.(*Client)
+	if !ok {
+		return nil, fmt.Errorf("mongo: cache value for %q is %T, want *Client", key, val)
+	}
+	return client, nil
+}
+
+func newClient(ctx context.Context, cfg *Config, clientKey string) (*Client, error) {
 	opts := options.Client().ApplyURI(cfg.URI)
 	if cfg.Username != "" || cfg.Password != "" {
 		creds := options.Credential{
@@ -76,7 +91,7 @@ func newClient(ctx context.Context, cfg *Config) (*Client, error) {
 		opts.SetMaxPoolSize(uint64(cfg.MaxPoolSize))
 	}
 
-	client, err := mongo.Connect(ctx, opts)
+	client, err := gomongo.Connect(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("mongo: connect: %w", err)
 	}
@@ -85,5 +100,43 @@ func newClient(ctx context.Context, cfg *Config) (*Client, error) {
 		return nil, fmt.Errorf("mongo: ping: %w", err)
 	}
 
-	return &Client{client: client, cfg: cfg}, nil
+	return &Client{client: client, cfg: cfg, cacheKey: clientKey}, nil
+}
+
+func clientConfigKey(cfg *Config) (string, error) {
+	normalized := *cfg
+	normalized.Database = ""
+	normalized.Collection = ""
+	fp, err := normalized.CacheFingerprint()
+	if err != nil {
+		return "", err
+	}
+	return "client:" + fp, nil
+}
+
+func collectionConfigKey(cfg *Config) (string, error) {
+	fp, err := cfg.CacheFingerprint()
+	if err != nil {
+		return "", err
+	}
+	return "collection:" + fp, nil
+}
+
+func clientFileKey(absPath string, cfg *Config) (string, error) {
+	normalized := *cfg
+	normalized.Database = ""
+	normalized.Collection = ""
+	fp, err := normalized.CacheFingerprint()
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("client:file:%s:%s", absPath, fp), nil
+}
+
+func collectionFileKey(absPath string, cfg *Config) (string, error) {
+	fp, err := cfg.CacheFingerprint()
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("collection:file:%s:%s", absPath, fp), nil
 }

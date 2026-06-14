@@ -1,6 +1,7 @@
 # MongoDB 单节点配置
 uri: ${env:MG_URI:-mongodb://localhost:27017}
 database: ${env:MG_DATABASE:-testdb}
+collection: ${env:MG_COLLECTION:-users}
 username: ${env:MG_USERNAME:-}
 password: ${env:MG_PASSWORD:-}
 connect_timeout_ms: 10000

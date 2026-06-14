@@ -75,8 +75,12 @@ deps-check: ## Layered dependency check (docx/tracing must not import mqx subpac
 	$(CHECK_DEPS)
 
 .PHONY: openspec
-openspec: ## Validate the active openspec change
-	openspec validate --changes --strict
+openspec: ## Validate the active openspec change (skips when openspec is not installed)
+	@if command -v openspec >/dev/null 2>&1; then \
+		openspec validate --changes --strict; \
+	else \
+		echo "openspec not installed; skipping"; \
+	fi
 
 # ----------------------------------------------------------------------
 # Examples

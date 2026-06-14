@@ -27,10 +27,6 @@ var (
 	currentTP atomic.Pointer[sdktrace.TracerProvider]
 )
 
-type noopProvider struct{}
-
-func (noopProvider) Tracer(_ string, _ ...any) any { return nil }
-
 func InitTracing(ctx context.Context, cfg config.TracingConfig, opts ...InitOption) error {
 	initMu.Lock()
 	defer initMu.Unlock()
@@ -40,7 +36,11 @@ func InitTracing(ctx context.Context, cfg config.TracingConfig, opts ...InitOpti
 		fn(o)
 	}
 	if o.noop {
-		otel.SetTracerProvider(sdktrace.NewTracerProvider())
+		tp := sdktrace.NewTracerProvider()
+		if prev := currentTP.Swap(tp); prev != nil {
+			_ = prev.Shutdown(ctx)
+		}
+		otel.SetTracerProvider(tp)
 		otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 			propagation.TraceContext{}, propagation.Baggage{},
 		))
@@ -49,6 +49,11 @@ func InitTracing(ctx context.Context, cfg config.TracingConfig, opts ...InitOpti
 
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("observability: %w", err)
+	}
+
+	sampler, err := buildSampler(cfg)
+	if err != nil {
+		return err
 	}
 
 	exp, err := tracing.NewExporter(cfg)
@@ -62,6 +67,7 @@ func InitTracing(ctx context.Context, cfg config.TracingConfig, opts ...InitOpti
 
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exp),
+		sdktrace.WithSampler(sampler),
 		sdktrace.WithResource(res),
 	)
 
@@ -73,4 +79,19 @@ func InitTracing(ctx context.Context, cfg config.TracingConfig, opts ...InitOpti
 		propagation.TraceContext{}, propagation.Baggage{},
 	))
 	return nil
+}
+
+func buildSampler(cfg config.TracingConfig) (sdktrace.Sampler, error) {
+	switch cfg.SamplerType {
+	case "", "always_on":
+		return sdktrace.AlwaysSample(), nil
+	case "always_off":
+		return sdktrace.NeverSample(), nil
+	case "traceidratio":
+		return sdktrace.TraceIDRatioBased(cfg.SamplerRatio), nil
+	case "parentbased_traceidratio":
+		return sdktrace.ParentBased(sdktrace.TraceIDRatioBased(cfg.SamplerRatio)), nil
+	default:
+		return nil, fmt.Errorf("observability: unsupported sampler_type %q", cfg.SamplerType)
+	}
 }

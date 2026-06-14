@@ -10,9 +10,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-replace github.com/gospacex/mqx => /Users/hyx/work/gowork/src/lego/mqx
-
-replace github.com/gospacex/hubx/cache/docx => /Users/hyx/work/gowork/src/lego/docx
+replace github.com/gospacex/hubx/cache/docx => ..
 
 require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect

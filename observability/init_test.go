@@ -32,3 +32,25 @@ func TestInitTracing_RejectsInvalidConfig(t *testing.T) {
 		t.Fatalf("expected validation error to bubble up, got: %v", err)
 	}
 }
+
+func TestBuildSampler_RejectsUnknownSampler(t *testing.T) {
+	_, err := buildSampler(config.TracingConfig{SamplerType: "mystery"})
+	if err == nil {
+		t.Fatal("expected buildSampler to reject unknown sampler type")
+	}
+	if !strings.Contains(err.Error(), "unsupported sampler_type") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestShutdownTracing_Idempotent(t *testing.T) {
+	if err := InitTracing(context.Background(), config.TracingConfig{}, WithNoop()); err != nil {
+		t.Fatalf("InitTracing(noop) failed: %v", err)
+	}
+	if err := ShutdownTracing(context.Background()); err != nil {
+		t.Fatalf("first ShutdownTracing should succeed: %v", err)
+	}
+	if err := ShutdownTracing(context.Background()); err != nil {
+		t.Fatalf("second ShutdownTracing should succeed: %v", err)
+	}
+}

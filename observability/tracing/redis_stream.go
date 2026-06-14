@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -65,6 +66,7 @@ func (e *redisStreamExporter) ExportSpans(ctx context.Context, spans []sdktrace.
 
 // Shutdown closes the owned redis client. Idempotent.
 func (e *redisStreamExporter) Shutdown(ctx context.Context) error {
+	_ = ctx
 	if e.shutdown {
 		return nil
 	}
@@ -94,5 +96,13 @@ func newRedisStreamExporter(cfg config.TracingConfig) (sdktrace.SpanExporter, er
 		opts.PoolSize = cfg.Redis.PoolSize
 	}
 	client := redis.NewClient(opts)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := client.Ping(ctx).Err(); err != nil {
+		_ = client.Close()
+		return nil, fmt.Errorf("tracing: redis_stream: ping: %w", err)
+	}
+
 	return &redisStreamExporter{client: client, stream: cfg.Producer.Topic}, nil
 }

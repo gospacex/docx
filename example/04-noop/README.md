@@ -9,6 +9,6 @@ records spans but never batches or sends them. Use this in:
   surface.
 - Local development when no collector is available.
 
-The key invariant: `tracing.Enabled` stays `true` (so the public
-methods are wired), but the global TracerProvider installed by
-`InitTracing(ctx, cfg, WithNoop())` is a drop-everything noop.
+The key invariant: the application explicitly installs a noop global
+TracerProvider via `InitTracing(ctx, cfg, WithNoop())`, and all traced
+helpers then write to that drop-everything provider.

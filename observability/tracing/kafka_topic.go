@@ -13,10 +13,7 @@ import (
 	"github.com/gospacex/hubx/cache/docx/config"
 )
 
-// flushTimeoutMs is the librdkafka Flush wait after each ExportSpans call.
-// 5s matches the timeout used by mqx's own kafkatopic exporter; long enough
-// for a typical batch, short enough that a stuck broker doesn't pin the
-// batch processor.
+// flushTimeoutMs is the librdkafka Flush wait used on exporter shutdown.
 const flushTimeoutMs = 5000
 
 // kafkaTopicExporter is a self-contained OTel SpanExporter that serialises
@@ -42,14 +39,20 @@ type spanRecord struct {
 }
 
 // ExportSpans serialises each span and produces it to the topic with the
-// trace_id as the partition key, then flushes so the batch processor sees
-// a synchronous result.
+// trace_id as the partition key. Delivery is flushed during Shutdown by the
+// surrounding BatchSpanProcessor / exporter lifecycle rather than per batch.
 func (e *kafkaTopicExporter) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlySpan) error {
 	if len(spans) == 0 {
 		return nil
 	}
 	topic := e.topic
 	for _, s := range spans {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		rec := spanRecord{
 			TraceID:   s.SpanContext().TraceID().String(),
 			SpanID:    s.SpanContext().SpanID().String(),
@@ -74,9 +77,6 @@ func (e *kafkaTopicExporter) ExportSpans(ctx context.Context, spans []sdktrace.R
 		if err := e.producer.Produce(msg, nil); err != nil {
 			return fmt.Errorf("tracing: kafka_topic: produce: %w", err)
 		}
-	}
-	if remaining := e.producer.Flush(flushTimeoutMs); remaining > 0 {
-		return fmt.Errorf("tracing: kafka_topic: flush timed out, %d messages still pending", remaining)
 	}
 	return nil
 }
@@ -114,8 +114,8 @@ func (e *kafkaTopicExporter) Shutdown(ctx context.Context) error {
 // keys are kept as inline literals to avoid carrying a wrapping struct.
 func newKafkaTopicExporter(cfg config.TracingConfig) (sdktrace.SpanExporter, error) {
 	cm := &kafka.ConfigMap{
-		"bootstrap.servers": strings.Join(cfg.Addrs, ","),
-		"acks":              cfg.Producer.Acks,
+		"bootstrap.servers":  strings.Join(cfg.Addrs, ","),
+		"acks":               cfg.Producer.Acks,
 		"enable.idempotence": cfg.Producer.Idempotent,
 	}
 	if cfg.Producer.LingerMs > 0 {

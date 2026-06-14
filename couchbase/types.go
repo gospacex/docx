@@ -7,9 +7,10 @@ import (
 )
 
 type Bucket struct {
-	Name    string
-	cluster *Cluster
-	bucket  *gocb.Bucket
+	Name     string
+	cluster  *Cluster
+	bucket   *gocb.Bucket
+	cacheKey string
 }
 
 func (b *Bucket) Get(id string) (*gocb.GetResult, error) {
@@ -37,20 +38,31 @@ func (b *Bucket) Ping() (*gocb.PingResult, error) {
 }
 
 func (b *Bucket) HealthCheck(ctx context.Context) error {
+	_ = ctx
 	_, err := b.bucket.Ping(&gocb.PingOptions{})
 	return err
 }
 
+func (b *Bucket) Close() error {
+	evict(b.cacheKey)
+	if b.cluster != nil {
+		return b.cluster.Close()
+	}
+	return nil
+}
+
 type Cluster struct {
-	cluster *gocb.Cluster
-	cfg     *Config
+	cluster  *gocb.Cluster
+	cfg      *Config
+	cacheKey string
 }
 
 func (c *Cluster) Bucket(name string) *Bucket {
 	return &Bucket{
-		Name:    name,
-		cluster: c,
-		bucket:  c.cluster.Bucket(name),
+		Name:     name,
+		cluster:  c,
+		bucket:   c.cluster.Bucket(name),
+		cacheKey: c.cacheKey,
 	}
 }
 
@@ -59,11 +71,13 @@ func (c *Cluster) Ping() (*gocb.PingResult, error) {
 }
 
 func (c *Cluster) HealthCheck(ctx context.Context) error {
+	_ = ctx
 	_, err := c.cluster.Ping(&gocb.PingOptions{})
 	return err
 }
 
 func (c *Cluster) Close() error {
+	evict(c.cacheKey)
 	if c.cluster != nil {
 		return c.cluster.Close(&gocb.ClusterCloseOptions{})
 	}

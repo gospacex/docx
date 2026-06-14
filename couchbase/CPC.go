@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 func CPC(ctx context.Context, configPath string) (*Cluster, error) {
@@ -17,10 +16,8 @@ func CPC(ctx context.Context, configPath string) (*Cluster, error) {
 	if err != nil {
 		return nil, fmt.Errorf("couchbase: %w", err)
 	}
-
-	base := strings.ToLower(filepath.Base(absPath))
-	if !strings.Contains(base, "couch") {
-		return nil, fmt.Errorf("couchbase: config %q does not appear to be a Couchbase config", absPath)
+	if err := validateConfigPath(absPath); err != nil {
+		return nil, err
 	}
 
 	content, err := os.ReadFile(absPath)
@@ -32,13 +29,24 @@ func CPC(ctx context.Context, configPath string) (*Cluster, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := cfg.ValidateCluster(); err != nil {
+		return nil, err
+	}
 
-	key := absPath
-	val, err := getOrCreate(key, func() (interface{}, error) {
-		return newClusterWithTracing(ctx, cfg)
+	key, err := clusterFileKey(absPath, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	val, err := getOrCreate(ctx, key, kindCluster, func(ctx context.Context) (any, error) {
+		return newCluster(ctx, cfg, key)
 	})
 	if err != nil {
 		return nil, err
 	}
-	return val.(*Cluster), nil
+	cluster, ok := val.(*Cluster)
+	if !ok {
+		return nil, fmt.Errorf("couchbase: cache value for %q is %T, want *Cluster", key, val)
+	}
+	return cluster, nil
 }

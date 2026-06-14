@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 func MPS(ctx context.Context, configPath string) (*Collection, error) {
@@ -17,7 +16,6 @@ func MPS(ctx context.Context, configPath string) (*Collection, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mongo: %w", err)
 	}
-
 	if err := validateConfigPath(absPath); err != nil {
 		return nil, err
 	}
@@ -31,23 +29,33 @@ func MPS(ctx context.Context, configPath string) (*Collection, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := cfg.ValidateCollection(); err != nil {
+		return nil, err
+	}
 
-	key := absPath
-	val, err := getOrCreate(key, func() (interface{}, error) {
-		return newCollection(ctx, cfg)
+	collectionKey, err := collectionFileKey(absPath, cfg)
+	if err != nil {
+		return nil, err
+	}
+	clientKey, err := clientFileKey(absPath, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	val, err := getOrCreate(ctx, collectionKey, kindCollection, func(ctx context.Context) (any, error) {
+		return newCollection(ctx, cfg, collectionKey, clientKey)
 	})
 	if err != nil {
 		return nil, err
 	}
-	return val.(*Collection), nil
+	coll, ok := val.(*Collection)
+	if !ok {
+		return nil, fmt.Errorf("mongo: cache value for %q is %T, want *Collection", collectionKey, val)
+	}
+	return coll, nil
 }
 
 func validateConfigPath(absPath string) error {
-	base := strings.ToLower(filepath.Base(absPath))
-	if !strings.Contains(base, "mongo") {
-		return fmt.Errorf("mongo: config %q does not appear to be a Mongo config", absPath)
-	}
-
 	ext := filepath.Ext(absPath)
 	switch ext {
 	case ".yaml", ".yml":

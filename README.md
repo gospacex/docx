@@ -6,7 +6,7 @@
 
 **docx** is a Go library that provides a consistent, opinionated abstraction layer over Couchbase and MongoDB, with pluggable distributed tracing via OpenTelemetry.
 
-It wraps the underlying database drivers with connection singleton caching, auto-initialized tracing, YAML-based configuration, and self-contained span exporters — so your application code talks to one library instead of juggling three SDKs.
+It wraps the underlying database drivers with connection singleton caching, explicit tracing initialization, YAML-based configuration, and self-contained span exporters — so your application code talks to one library instead of juggling three SDKs.
 
 ---
 
@@ -17,7 +17,7 @@ docx is a **multi-module monorepo** with three Go modules:
 ```
 docx/                         # github.com/gospacex/hubx/cache/docx
 ├── config/                   # TracingConfig, CouchbaseConfig, MongoConfig
-├── observability/            # InitTracing, StartSpan, context propagation
+├── observability/            # InitTracing, ShutdownTracing, StartSpan, context propagation
 │   └── tracing/              # SpanExporter: Jaeger / Kafka Topic / Redis Stream
 ├── utils/                    # Config fingerprinting, env-var expansion
 ├── test/                     # Shared test helpers
@@ -36,7 +36,7 @@ docx/                         # github.com/gospacex/hubx/cache/docx
 ## Features
 
 - **Connection singleton caching** — `sync.Map`-based `getOrCreate` with 30s error cooldown; reconnecting with the same config reuses the existing connection.
-- **Distributed tracing** — every database operation can emit OpenTelemetry spans automatically.
+- **Distributed tracing** — traced helpers emit OpenTelemetry spans after the application explicitly initializes tracing once.
 - **Three span export modes** (self-contained, no external dependency injection):
   - **Jaeger** — OTLP gRPC or HTTP to a Jaeger collector.
   - **Kafka topic** — serialises spans as JSON to a Kafka topic via `confluent-kafka-go/v2`.
@@ -88,22 +88,67 @@ func main() {
     defer bucket.Close()
 
     // Typed CRUD
-    _ = bucket.Upsert(ctx, "my-key", map[string]string{"hello": "world"})
+    if _, err := bucket.Upsert("my-key", map[string]string{"hello": "world"}); err != nil {
+        log.Fatal(err)
+    }
 }
 ```
 
 ```yaml
 # couchbase.yaml
-address: localhost
+endpoints:
+  - localhost:8091
+bucket: my-bucket
 username: admin
 password: pass
-bucket_name: my-bucket
-tracing:
-  enabled: true
-  service_name: my-service
-  exporter: jaeger
-  endpoint: localhost:4317
 ```
+
+### Enabling tracing explicitly
+
+`COS` / `COC` / `MOS` / `MOC` no longer install a global tracer provider
+implicitly. If you want traced helpers such as `GetTrace`, `InsertTrace`,
+or `FindTrace`, initialize tracing once in your application and shut it
+back down on exit:
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+    "os"
+
+    "github.com/gospacex/hubx/cache/couchbase"
+    "github.com/gospacex/hubx/cache/docx/observability"
+)
+
+func main() {
+    ctx := context.Background()
+
+    raw, err := os.ReadFile("couchbase.yaml")
+    if err != nil {
+        log.Fatal(err)
+    }
+    cfg, err := couchbase.ParseConfig(raw)
+    if err != nil {
+        log.Fatal(err)
+    }
+    if err := observability.InitTracing(ctx, cfg.Tracing); err != nil {
+        log.Fatal(err)
+    }
+    defer observability.ShutdownTracing(ctx)
+
+    bucket, err := couchbase.COS(ctx, cfg)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer bucket.Close()
+}
+```
+
+The `tracing:` block in YAML is still the canonical source for exporter,
+sampling, and auth settings; it is simply consumed explicitly by the
+application now.
 
 ---
 
@@ -147,10 +192,11 @@ Validation rules are documented in [`config/tracing.go`](config/tracing.go) — 
 
 ```yaml
 # Couchbase
-address: localhost
+endpoints:
+  - localhost:8091
 username: admin
 password: ${env:CB_PASS}
-bucket_name: my-bucket
+bucket: my-bucket
 tracing: { ... }
 ```
 
@@ -173,7 +219,7 @@ tracing: { ... }
 | Package | Key functions |
 |---|---|
 | `config` | `TracingConfig`, `CouchbaseConfig`, `MongoConfig` structs; `Validate()` |
-| `observability` | `InitTracing(ctx, cfg)`, `StartSpan(ctx, name)`, `SetBaggage`, `GetBaggage`, `InjectTrace`, `ExtractTrace` |
+| `observability` | `InitTracing(ctx, cfg)`, `ShutdownTracing(ctx)`, `StartSpan(ctx, name)`, `SetBaggage`, `GetBaggage`, `InjectTrace`, `ExtractTrace` |
 | `observability/tracing` | `NewExporter(cfg)` — factory returning `sdktrace.SpanExporter` |
 | `utils` | `Fingerprint(cfg)`, `ExpandEnvVars(s)` |
 
@@ -186,7 +232,7 @@ tracing: { ... }
 | `CPS(ctx, path)` | Couchbase **P**arse-and-Connect **S**tandard — YAML → `*Bucket` |
 | `CPC(ctx, path)` | Couchbase **P**arse-and-Connect **C**luster — YAML → `*Cluster` |
 
-**Bucket methods**: `Get`, `Insert`, `Upsert`, `Remove`, `Ping`, `HealthCheck`
+**Bucket methods**: `Get`, `Insert`, `Upsert`, `Remove`, `Ping`, `HealthCheck`, `Close()`
 
 **Traced wrappers**: `GetTrace`, `InsertTrace`, `UpdateTrace`, `DeleteTrace` — same signatures with automatic span emission.
 
@@ -199,7 +245,7 @@ tracing: { ... }
 | `MPC(ctx, path)` | Mongo **P**arse-and-Connect **C**lient — YAML → `*Client` |
 | `MPS(ctx, path)` | Mongo **P**arse-and-Connect **S**tandard — YAML → `*Collection` |
 
-**Collection methods**: `Find`, `FindOne`, `InsertOne`, `UpdateOne`, `DeleteOne`, `HealthCheck`
+**Collection methods**: `Find`, `FindOne`, `InsertOne`, `UpdateOne`, `DeleteOne`, `HealthCheck`, `Close(ctx)`
 
 **Traced wrappers**: `FindTrace`, `FindOneTrace`, `InsertTrace`, `UpdateTrace`, `DeleteTrace`
 

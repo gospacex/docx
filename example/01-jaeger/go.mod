@@ -2,9 +2,7 @@ module github.com/gospacex/hubx/cache/example/couchbase_test
 
 go 1.26.2
 
-replace github.com/gospacex/mqx => /Users/hyx/work/gowork/src/lego/mqx
-
-replace github.com/gospacex/hubx/cache/docx => /Users/hyx/work/gowork/src/lego/docx
+replace github.com/gospacex/hubx/cache/docx => ../..
 
 require (
 	github.com/gospacex/hubx/cache/couchbase v0.0.0-00010101000000-000000000000
@@ -49,4 +47,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/gospacex/hubx/cache/couchbase => /Users/hyx/work/gowork/src/lego/docx/couchbase
+replace github.com/gospacex/hubx/cache/couchbase => ../../couchbase

@@ -1,72 +1,75 @@
 package couchbase
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
 )
 
-const errorCooldown = 30 * time.Second
+type resourceKind string
+
+const (
+	kindCluster resourceKind = "cluster"
+	kindBucket  resourceKind = "bucket"
+
+	errorCooldown = 30 * time.Second
+)
 
 type cacheEntry struct {
-	cluster  *Cluster
-	bucket   *Bucket
+	ready    chan struct{}
+	kind     resourceKind
+	value    any
 	err      error
 	failedAt time.Time
 }
 
-var (
-	store sync.Map
-	lock  sync.Mutex
-)
+var store sync.Map
 
-func getOrCreate(key string, fn func() (interface{}, error)) (interface{}, error) {
-	if val, ok := store.Load(key); ok {
-		e := val.(*cacheEntry)
-		if e.cluster != nil {
-			return e.cluster, nil
+func getOrCreate(ctx context.Context, key string, kind resourceKind, fn func(context.Context) (any, error)) (any, error) {
+	for {
+		fresh := &cacheEntry{ready: make(chan struct{}), kind: kind}
+		actual, loaded := store.LoadOrStore(key, fresh)
+		entry := actual.(*cacheEntry)
+
+		if !loaded {
+			fresh.value, fresh.err = fn(ctx)
+			if fresh.err != nil {
+				fresh.failedAt = time.Now()
+			}
+			close(fresh.ready)
+			return fresh.value, fresh.err
 		}
-		if e.bucket != nil {
-			return e.bucket, nil
+
+		select {
+		case <-entry.ready:
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		}
-		if e.err != nil && time.Since(e.failedAt) < errorCooldown {
-			return nil, e.err
+
+		if entry.kind != kind {
+			return nil, fmt.Errorf("couchbase: cache kind mismatch for key %q: want %s, got %s", key, kind, entry.kind)
+		}
+		if entry.err == nil {
+			return entry.value, nil
+		}
+		if time.Since(entry.failedAt) < errorCooldown {
+			return nil, entry.err
+		}
+
+		if store.CompareAndSwap(key, entry, fresh) {
+			fresh.value, fresh.err = fn(ctx)
+			if fresh.err != nil {
+				fresh.failedAt = time.Now()
+			}
+			close(fresh.ready)
+			return fresh.value, fresh.err
 		}
 	}
+}
 
-	lock.Lock()
-	if val, ok := store.Load(key); ok {
-		lock.Unlock()
-		e := val.(*cacheEntry)
-		if e.cluster != nil {
-			return e.cluster, nil
-		}
-		if e.bucket != nil {
-			return e.bucket, nil
-		}
-		return nil, e.err
-	}
-
-	e := &cacheEntry{}
-	store.Store(key, e)
-	lock.Unlock()
-
-	result, err := fn()
-	if err != nil {
-		e.err = err
-		e.failedAt = time.Now()
+func evict(key string) {
+	if key != "" {
 		store.Delete(key)
-		return nil, err
 	}
-
-	switch v := result.(type) {
-	case *Cluster:
-		e.cluster = v
-	case *Bucket:
-		e.bucket = v
-	default:
-		store.Delete(key)
-		return nil, fmt.Errorf("couchbase: unexpected type %T", result)
-	}
-	return result, nil
 }

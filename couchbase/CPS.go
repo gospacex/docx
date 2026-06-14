@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 func CPS(ctx context.Context, configPath string) (*Bucket, error) {
@@ -17,7 +16,6 @@ func CPS(ctx context.Context, configPath string) (*Bucket, error) {
 	if err != nil {
 		return nil, fmt.Errorf("couchbase: %w", err)
 	}
-
 	if err := validateConfigPath(absPath); err != nil {
 		return nil, err
 	}
@@ -31,23 +29,33 @@ func CPS(ctx context.Context, configPath string) (*Bucket, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := cfg.ValidateBucket(); err != nil {
+		return nil, err
+	}
 
-	key := absPath
-	val, err := getOrCreate(key, func() (interface{}, error) {
-		return newBucket(ctx, cfg)
+	bucketKey, err := bucketFileKey(absPath, cfg)
+	if err != nil {
+		return nil, err
+	}
+	clusterKey, err := clusterFileKey(absPath, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	val, err := getOrCreate(ctx, bucketKey, kindBucket, func(ctx context.Context) (any, error) {
+		return newBucket(ctx, cfg, bucketKey, clusterKey)
 	})
 	if err != nil {
 		return nil, err
 	}
-	return val.(*Bucket), nil
+	bucket, ok := val.(*Bucket)
+	if !ok {
+		return nil, fmt.Errorf("couchbase: cache value for %q is %T, want *Bucket", bucketKey, val)
+	}
+	return bucket, nil
 }
 
 func validateConfigPath(absPath string) error {
-	base := strings.ToLower(filepath.Base(absPath))
-	if !strings.Contains(base, "couch") {
-		return fmt.Errorf("couchbase: config %q does not appear to be a Couchbase config", absPath)
-	}
-
 	ext := filepath.Ext(absPath)
 	switch ext {
 	case ".yaml", ".yml":

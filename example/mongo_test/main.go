@@ -8,8 +8,9 @@ import (
 	"syscall"
 	"time"
 
-	mongo "github.com/gospacex/hubx/cache/mongo"
 	"github.com/gospacex/hubx/cache/docx/config"
+	"github.com/gospacex/hubx/cache/docx/observability"
+	mongo "github.com/gospacex/hubx/cache/mongo"
 )
 
 func main() {
@@ -19,8 +20,9 @@ func main() {
 	defer cancel()
 
 	cfg := &mongo.Config{
-		URI:      "mongodb://localhost:27017",
-		Database: "testdb",
+		URI:            "mongodb://localhost:27017",
+		Database:       "testdb",
+		Collection:     "users",
 		ConnectTimeout: 10000,
 		MaxPoolSize:    100,
 		Tracing: config.TracingConfig{
@@ -31,6 +33,15 @@ func main() {
 			Protocol:    "grpc",
 		},
 	}
+
+	if err := observability.InitTracing(ctx, cfg.Tracing); err != nil {
+		log.Fatalf("InitTracing failed: %v", err)
+	}
+	defer func() {
+		if err := observability.ShutdownTracing(ctx); err != nil {
+			log.Printf("ShutdownTracing failed: %v", err)
+		}
+	}()
 
 	client, err := mongo.MOC(ctx, cfg)
 	if err != nil {
@@ -44,7 +55,7 @@ func main() {
 		log.Println("[MOC] health check OK")
 	}
 
-	coll := client.Collection("testdb", "users")
+	coll := client.Collection(cfg.Database, cfg.Collection)
 	log.Printf("[MOC] collection=%s ready", coll.Name)
 
 	_, err = mongo.InsertTrace(ctx, coll, map[string]interface{}{
@@ -69,8 +80,7 @@ func main() {
 	if err != nil {
 		log.Printf("[MOS] failed: %v", err)
 	} else {
-		log.Printf("[MOS] collection ready")
-		_ = singleColl
+		log.Printf("[MOS] collection=%s ready", singleColl.Name)
 	}
 
 	psClient, err := mongo.MPC(ctx, "mongo.yaml")
@@ -85,8 +95,7 @@ func main() {
 	if err != nil {
 		log.Printf("[MPS] failed: %v (expected without server)", err)
 	} else {
-		log.Printf("[MPS] collection ready from config file")
-		_ = psColl
+		log.Printf("[MPS] collection=%s ready from config file", psColl.Name)
 	}
 
 	sigCh := make(chan os.Signal, 1)

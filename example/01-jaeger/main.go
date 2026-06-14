@@ -10,6 +10,7 @@ import (
 
 	couchbase "github.com/gospacex/hubx/cache/couchbase"
 	"github.com/gospacex/hubx/cache/docx/config"
+	"github.com/gospacex/hubx/cache/docx/observability"
 )
 
 func main() {
@@ -34,6 +35,15 @@ func main() {
 		},
 	}
 
+	if err := observability.InitTracing(ctx, cfg.Tracing); err != nil {
+		log.Fatalf("InitTracing failed: %v", err)
+	}
+	defer func() {
+		if err := observability.ShutdownTracing(ctx); err != nil {
+			log.Printf("ShutdownTracing failed: %v", err)
+		}
+	}()
+
 	bucket, err := couchbase.COS(ctx, cfg)
 	if err != nil {
 		log.Fatalf("COS failed: %v", err)
@@ -54,7 +64,12 @@ func main() {
 	if err != nil {
 		log.Printf("[COS] GetTrace failed: %v", err)
 	} else {
-		log.Printf("[COS] GetTrace user:1 -> %v", result.Content)
+		var doc map[string]interface{}
+		if err := result.Content(&doc); err != nil {
+			log.Printf("[COS] decode failed: %v", err)
+		} else {
+			log.Printf("[COS] GetTrace user:1 -> %v", doc)
+		}
 	}
 
 	cluster, err := couchbase.COC(ctx, cfg)

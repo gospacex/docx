@@ -13,7 +13,7 @@ import "fmt"
 // Field renames vs the legacy struct (2026-06-13):
 //
 //	Backend     → Exporter
-//	Mode        → REMOVED (sampling lives in OTel SDK; cfg.SamplerRatio covers it)
+//	Mode        → REMOVED (sampling lives in OTel SDK; cfg.SamplerType / cfg.SamplerRatio cover it)
 //	KafkaBrokers  → Addrs
 //	KafkaTopic    → Producer.Topic
 //	KafkaSASLMechanism → Kafka.SASLMechanism
@@ -23,15 +23,15 @@ import "fmt"
 //	Stream        → Producer.Topic (shared between kafka and redis)
 //	KafkaProducer / RedisClient (any inject) → REMOVED
 type TracingConfig struct {
-	Enabled     bool              `yaml:"enabled"`
-	ServiceName string            `yaml:"service_name"`
-	Exporter    string            `yaml:"exporter"` // jaeger | kafka_topic | redis_stream
-	Protocol    string            `yaml:"protocol"` // grpc | http (jaeger only); default grpc
-	Endpoint    string            `yaml:"endpoint"`
-	SamplerType string            `yaml:"sampler_type"`
-	SamplerRatio float64          `yaml:"sampler_ratio"`
-	Insecure    bool              `yaml:"insecure"`
-	Headers     map[string]string `yaml:"headers"`
+	Enabled      bool              `yaml:"enabled"`
+	ServiceName  string            `yaml:"service_name"`
+	Exporter     string            `yaml:"exporter"` // jaeger | kafka_topic | redis_stream
+	Protocol     string            `yaml:"protocol"` // grpc | http (jaeger only); default grpc
+	Endpoint     string            `yaml:"endpoint"`
+	SamplerType  string            `yaml:"sampler_type"`
+	SamplerRatio float64           `yaml:"sampler_ratio"`
+	Insecure     bool              `yaml:"insecure"`
+	Headers      map[string]string `yaml:"headers"`
 
 	// Addrs is the connection address list. For redis exporters, Addrs[0]
 	// is used as the redis server address (mqx redisx also accepts []string
@@ -90,9 +90,8 @@ type TracingProducerConfig struct {
 }
 
 // Validate enforces the rules shared by every tracing exporter plus the
-// per-exporter required fields. It mutates Protocol and Producer.Acks
-// in place to apply defaults (matching mqx behaviour: ACKS defaults to
-// "all", idempotence default true).
+// per-exporter required fields. It mutates Protocol, SamplerType and
+// Producer.Acks in place to apply defaults.
 func (c *TracingConfig) Validate() error {
 	if !c.Enabled {
 		return nil
@@ -103,6 +102,14 @@ func (c *TracingConfig) Validate() error {
 	if c.Protocol == "" {
 		c.Protocol = "grpc"
 	}
+	if c.SamplerType == "" {
+		if c.SamplerRatio > 0 && c.SamplerRatio < 1 {
+			c.SamplerType = "parentbased_traceidratio"
+		} else {
+			c.SamplerType = "always_on"
+		}
+	}
+
 	switch c.Exporter {
 	case "jaeger":
 		if c.Endpoint == "" {
@@ -122,9 +129,7 @@ func (c *TracingConfig) Validate() error {
 			c.Producer.Acks = "all"
 		}
 		if !c.Producer.Idempotent {
-			// mqx parity: idempotence is on by default for tracing producers
-			// to guarantee exactly-once delivery on retry; operators can opt
-			// out by setting idem=... no — they must explicitly disable.
+			// mqx parity: idempotence is on by default for tracing producers.
 			c.Producer.Idempotent = true
 		}
 	case "redis_stream":
@@ -139,6 +144,14 @@ func (c *TracingConfig) Validate() error {
 	default:
 		return fmt.Errorf("config: unknown exporter %q", c.Exporter)
 	}
+
+	switch c.SamplerType {
+	case "always_on", "always_off", "traceidratio", "parentbased_traceidratio":
+		// valid
+	default:
+		return fmt.Errorf("config: unsupported sampler_type %q", c.SamplerType)
+	}
+
 	if c.SamplerRatio < 0 || c.SamplerRatio > 1 {
 		return fmt.Errorf("config: sampler_ratio out of range [0,1]: %v", c.SamplerRatio)
 	}

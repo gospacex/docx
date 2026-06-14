@@ -3,37 +3,27 @@ package couchbase
 import (
 	"context"
 	"fmt"
-
-	"github.com/gospacex/hubx/cache/docx/observability"
 )
 
 func COC(ctx context.Context, cfg *Config) (*Cluster, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("couchbase: config is nil")
-	}
-	if len(cfg.Endpoints) == 0 {
-		return nil, fmt.Errorf("couchbase: endpoints is required")
+	if err := cfg.ValidateCluster(); err != nil {
+		return nil, err
 	}
 
-	key := cfg.ContentHash()
-	if key == "" {
-		key = fmt.Sprintf("%s|%s", cfg.Endpoints[0], cfg.Bucket)
+	key, err := clusterConfigKey(cfg)
+	if err != nil {
+		return nil, err
 	}
 
-	val, err := getOrCreate(key, func() (interface{}, error) {
-		return newClusterWithTracing(ctx, cfg)
+	val, err := getOrCreate(ctx, key, kindCluster, func(ctx context.Context) (any, error) {
+		return newCluster(ctx, cfg, key)
 	})
 	if err != nil {
 		return nil, err
 	}
-	return val.(*Cluster), nil
-}
-
-func newClusterWithTracing(ctx context.Context, cfg *Config) (*Cluster, error) {
-	if cfg.Tracing.Enabled {
-		if err := observability.InitTracing(ctx, cfg.Tracing); err != nil {
-			return nil, fmt.Errorf("couchbase: %w", err)
-		}
+	cluster, ok := val.(*Cluster)
+	if !ok {
+		return nil, fmt.Errorf("couchbase: cache value for %q is %T, want *Cluster", key, val)
 	}
-	return newCluster(ctx, cfg)
+	return cluster, nil
 }

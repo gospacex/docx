@@ -33,6 +33,11 @@ func main() {
 	}, observability.WithNoop()); err != nil {
 		log.Fatalf("InitTracing(noop) failed: %v", err)
 	}
+	defer func() {
+		if err := observability.ShutdownTracing(ctx); err != nil {
+			log.Printf("ShutdownTracing(noop) failed: %v", err)
+		}
+	}()
 	log.Println("[noop] InitTracing ok; spans will be discarded")
 
 	cfg := &couchbase.Config{
@@ -43,10 +48,9 @@ func main() {
 		ConnectTimeout: 10000,
 		SocketTimeout:  5000,
 		Tracing: config.TracingConfig{
-			// COS checks cfg.Tracing.Enabled to decide whether to wire a
-			// real exporter, so we set it false here and rely on the manual
-			// InitTracing call above. In production code, prefer one or
-			// the other, not both.
+			// Connection opening no longer auto-initializes tracing; we keep
+			// tracing config disabled here because the noop TracerProvider has
+			// already been installed explicitly above.
 			Enabled: false,
 		},
 	}

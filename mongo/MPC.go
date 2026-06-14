@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 func MPC(ctx context.Context, configPath string) (*Client, error) {
@@ -17,10 +16,8 @@ func MPC(ctx context.Context, configPath string) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mongo: %w", err)
 	}
-
-	base := strings.ToLower(filepath.Base(absPath))
-	if !strings.Contains(base, "mongo") {
-		return nil, fmt.Errorf("mongo: config %q does not appear to be a Mongo config", absPath)
+	if err := validateConfigPath(absPath); err != nil {
+		return nil, err
 	}
 
 	content, err := os.ReadFile(absPath)
@@ -32,13 +29,24 @@ func MPC(ctx context.Context, configPath string) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := cfg.ValidateClient(); err != nil {
+		return nil, err
+	}
 
-	key := absPath
-	val, err := getOrCreate(key, func() (interface{}, error) {
-		return newClientWithTracing(ctx, cfg)
+	key, err := clientFileKey(absPath, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	val, err := getOrCreate(ctx, key, kindClient, func(ctx context.Context) (any, error) {
+		return newClient(ctx, cfg, key)
 	})
 	if err != nil {
 		return nil, err
 	}
-	return val.(*Client), nil
+	client, ok := val.(*Client)
+	if !ok {
+		return nil, fmt.Errorf("mongo: cache value for %q is %T, want *Client", key, val)
+	}
+	return client, nil
 }
