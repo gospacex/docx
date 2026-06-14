@@ -1,6 +1,6 @@
 module github.com/gospacex/hubx/cache/docx/example/02-kafka-topic
 
-go 1.26.2
+go 1.19
 
 replace github.com/gospacex/hubx/cache/couchbase => ../../couchbase
 

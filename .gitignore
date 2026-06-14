@@ -1,0 +1,128 @@
+```
+# Dependencies
+go.mod
+go.sum
+go.work
+
+# Build artifacts
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+
+# Go-specific
+*.test
+*_test.go
+cover.out
+profile.out
+go-build*/
+
+# Logs and temp files
+*.log
+*.tmp
+
+# Environment
+.env
+.env.local
+.env.*
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# Cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Node
+node_modules/
+
+# Java
+*.class
+*.jar
+*.war
+*.ear
+target/
+.gradle/
+build/
+
+# Python
+*.py[cod]
+*$py.class
+*$pyc.*
+*$pyo.*
+*~
+.pytest_cache/
+.mypy_cache/
+.hypothesis/
+
+# Distribution / packaging
+.Python
+env/
+venv/
+.venv/
+.conda
+.venv.bak/
+venv.bak/
+
+# Testing
+.coverage*
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.gcda
+*.gcno
+*.gcov
+
+# CI
+.github/
+.circleci/
+.travis.yml
+.drone.yml
+.gitlab-ci.yml
+.semaphore/semaphore.yml
+
+# Documentation
+docs/_build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# System
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+```
