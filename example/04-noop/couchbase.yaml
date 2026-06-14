@@ -1,0 +1,9 @@
+endpoints:
+  - localhost:8091
+bucket: default
+username: Administrator
+password: password
+connect_timeout_ms: 10000
+socket_timeout_ms: 5000
+tracing:
+  enabled: false   # Noop: InitTracing is called manually with WithNoop().

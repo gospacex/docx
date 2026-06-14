@@ -1,0 +1,22 @@
+endpoints:
+  - ${env:CB_ENDPOINT:-localhost:8091}
+bucket: ${env:CB_BUCKET:-default}
+username: ${env:CB_USERNAME:-Administrator}
+password: ${env:CB_PASSWORD:-password}
+connect_timeout_ms: 10000
+socket_timeout_ms: 5000
+tracing:
+  enabled: true
+  service_name: couchbase-redis-stream-example
+  exporter: redis_stream
+  addrs:
+    - ${env:REDIS_ADDR:-localhost:6379}
+  auth:
+    username: ${env:REDIS_USERNAME:-}
+    password: ${env:REDIS_PASSWORD:-}
+  redis:
+    db: 0
+    pool_size: 10
+  producer:
+    topic: ${env:REDIS_STREAM:-otel-traces}
+  sampler_ratio: 1.0

@@ -1,0 +1,18 @@
+endpoints:
+  - ${env:CB_ENDPOINT:-localhost:8091}
+bucket: ${env:CB_BUCKET:-default}
+username: ${env:CB_USERNAME:-Administrator}
+password: ${env:CB_PASSWORD:-password}
+connect_timeout_ms: 10000
+socket_timeout_ms: 5000
+tracing:
+  enabled: true
+  service_name: couchbase-kafka-topic-example
+  exporter: kafka_topic
+  addrs:
+    - ${env:KAFKA_BROKER:-localhost:9092}
+  producer:
+    topic: ${env:KAFKA_TRACE_TOPIC:-otel-traces}
+    acks: all
+    idempotent: true
+  sampler_ratio: 1.0

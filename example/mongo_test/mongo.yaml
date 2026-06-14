@@ -1,0 +1,15 @@
+# MongoDB 单节点配置
+uri: ${env:MG_URI:-mongodb://localhost:27017}
+database: ${env:MG_DATABASE:-testdb}
+username: ${env:MG_USERNAME:-}
+password: ${env:MG_PASSWORD:-}
+connect_timeout_ms: 10000
+max_pool_size: 100
+tracing:
+  enabled: true
+  service_name: mongo-example
+  exporter: ${env:MG_TRACE_EXPORTER:-jaeger}
+  endpoint: ${env:JAEGER_ENDPOINT:-localhost:4317}
+  protocol: grpc
+  sampler_type: always_on
+  sampler_ratio: 1.0

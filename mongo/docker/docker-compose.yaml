@@ -1,0 +1,22 @@
+# MongoDB Service for HubX
+
+services:
+  mongodb:
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/mongo:7.0
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - ./data/mongodb/data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: hubx
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+networks:
+  default:
+    name: hubx-mongo-network
+    driver: bridge
