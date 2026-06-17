@@ -1,0 +1,28 @@
+# cachex — single-instance Redis with OTLP HTTP trace export to local jaeger (legoB).
+backend: redis
+driver: redis
+addrs:
+  - localhost:6379
+password: redis123456
+db: 0
+pool_size: 20
+min_idle_conns: 5
+max_retries: 3
+dial_timeout: 5
+read_timeout: 3
+write_timeout: 3
+idle_timeout: 60
+pool_timeout: 4
+cluster_mode: false
+metrics: true
+metrics_prefix: cachex
+
+trace:
+  enabled: true
+  service_name: examples-cachexwirejaeger
+  exporter: otlp
+  endpoint: localhost:4318
+  insecure: true
+  protocol: http
+  sampler_type: always_on
+  sampler_ratio: 1.0

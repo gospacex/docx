@@ -16,9 +16,17 @@ import (
 // ReadOnlySpan as a single entry to a Redis Stream. It owns the underlying
 // *redis.Client and closes it on Shutdown.
 type redisStreamExporter struct {
-	client   *redis.Client
+	client   redisStreamClient
 	stream   string
 	shutdown bool
+}
+
+// redisStreamClient is the slice of *redis.Client we depend on. Defining
+// it here (vs using *redis.Client directly) lets unit tests substitute
+// a stub without spinning up a real Redis server.
+type redisStreamClient interface {
+	XAdd(ctx context.Context, args *redis.XAddArgs) *redis.StringCmd
+	Close() error
 }
 
 type redisSpanRecord struct {
@@ -27,6 +35,25 @@ type redisSpanRecord struct {
 	Name       string            `json:"name"`
 	StartTime  string            `json:"start_time"`
 	Attributes map[string]string `json:"attributes,omitempty"`
+}
+
+// buildRedisSpanRecord projects a ReadOnlySpan onto the on-the-wire
+// redisSpanRecord. Extracted as a free function so the projection is
+// unit-testable without a Redis broker.
+func buildRedisSpanRecord(s sdktrace.ReadOnlySpan) redisSpanRecord {
+	rec := redisSpanRecord{
+		TraceID:   s.SpanContext().TraceID().String(),
+		SpanID:    s.SpanContext().SpanID().String(),
+		Name:      s.Name(),
+		StartTime: s.StartTime().String(),
+	}
+	if attrs := s.Attributes(); len(attrs) != 0 {
+		rec.Attributes = make(map[string]string, len(attrs))
+		for _, kv := range attrs {
+			rec.Attributes[string(kv.Key)] = kv.Value.Emit()
+		}
+	}
+	return rec
 }
 
 // ExportSpans XAdds each span as one stream entry with the JSON payload in
@@ -38,18 +65,7 @@ func (e *redisStreamExporter) ExportSpans(ctx context.Context, spans []sdktrace.
 		return nil
 	}
 	for _, s := range spans {
-		rec := redisSpanRecord{
-			TraceID:   s.SpanContext().TraceID().String(),
-			SpanID:    s.SpanContext().SpanID().String(),
-			Name:      s.Name(),
-			StartTime: s.StartTime().String(),
-		}
-		if attrs := s.Attributes(); len(attrs) != 0 {
-			rec.Attributes = make(map[string]string, len(attrs))
-			for _, kv := range attrs {
-				rec.Attributes[string(kv.Key)] = kv.Value.Emit()
-			}
-		}
+		rec := buildRedisSpanRecord(s)
 		payload, err := json.Marshal(rec)
 		if err != nil {
 			return fmt.Errorf("tracing: redis_stream: marshal span: %w", err)

@@ -21,7 +21,7 @@ const flushTimeoutMs = 5000
 //
 // It owns the underlying *kafka.Producer and flushes+closes it on Shutdown.
 type kafkaTopicExporter struct {
-	producer *kafka.Producer
+	producer kafkaSender
 	topic    string
 	shutdown bool
 }
@@ -36,6 +36,44 @@ type spanRecord struct {
 	Name       string            `json:"name"`
 	StartTime  string            `json:"start_time"`
 	Attributes map[string]string `json:"attributes,omitempty"`
+}
+
+// buildSpanRecord projects a ReadOnlySpan onto the on-the-wire spanRecord.
+// Extracted as a free function so the projection is unit-testable without
+// a Kafka broker — the only branch (with-attrs vs without-attrs) is here.
+func buildSpanRecord(s sdktrace.ReadOnlySpan) spanRecord {
+	rec := spanRecord{
+		TraceID:   s.SpanContext().TraceID().String(),
+		SpanID:    s.SpanContext().SpanID().String(),
+		Name:      s.Name(),
+		StartTime: s.StartTime().String(),
+	}
+	if attrs := s.Attributes(); len(attrs) != 0 {
+		rec.Attributes = make(map[string]string, len(attrs))
+		for _, kv := range attrs {
+			rec.Attributes[string(kv.Key)] = kv.Value.Emit()
+		}
+	}
+	return rec
+}
+
+// kafkaSender is the minimal contract a Kafka producer must satisfy to
+// plug into kafkaTopicExporter. It exists so unit tests can verify the
+// per-span message shape, the Flush timeout branch, and the Close path
+// without spinning up librdkafka. In production *kafka.Producer
+// satisfies it via the librdkafkaProducerAdapter.
+type kafkaSender interface {
+	Send(msg *kafka.Message) error
+	Flush(timeoutMs int) int
+	Close()
+}
+
+// send adapts *kafka.Producer to kafkaSender. The real Produce call is
+// non-blocking — librdkafka queues the message and reports delivery via
+// the Events channel — so unit tests can call Send with an unreachable
+// broker and only observe a successful queue admission.
+func (e *kafkaTopicExporter) send(msg *kafka.Message) error {
+	return e.producer.Send(msg)
 }
 
 // ExportSpans serialises each span and produces it to the topic with the
@@ -53,18 +91,7 @@ func (e *kafkaTopicExporter) ExportSpans(ctx context.Context, spans []sdktrace.R
 		default:
 		}
 
-		rec := spanRecord{
-			TraceID:   s.SpanContext().TraceID().String(),
-			SpanID:    s.SpanContext().SpanID().String(),
-			Name:      s.Name(),
-			StartTime: s.StartTime().String(),
-		}
-		if attrs := s.Attributes(); len(attrs) != 0 {
-			rec.Attributes = make(map[string]string, len(attrs))
-			for _, kv := range attrs {
-				rec.Attributes[string(kv.Key)] = kv.Value.Emit()
-			}
-		}
+		rec := buildSpanRecord(s)
 		payload, err := json.Marshal(rec)
 		if err != nil {
 			return fmt.Errorf("tracing: kafka_topic: marshal span: %w", err)
@@ -74,7 +101,7 @@ func (e *kafkaTopicExporter) ExportSpans(ctx context.Context, spans []sdktrace.R
 			Key:            []byte(rec.TraceID),
 			Value:          payload,
 		}
-		if err := e.producer.Produce(msg, nil); err != nil {
+		if err := e.send(msg); err != nil {
 			return fmt.Errorf("tracing: kafka_topic: produce: %w", err)
 		}
 	}
@@ -138,5 +165,25 @@ func newKafkaTopicExporter(cfg config.TracingConfig) (sdktrace.SpanExporter, err
 	if err != nil {
 		return nil, fmt.Errorf("tracing: kafka_topic: new producer: %w", err)
 	}
-	return &kafkaTopicExporter{producer: producer, topic: cfg.Producer.Topic}, nil
+	return &kafkaTopicExporter{producer: &librdkafkaProducerAdapter{p: producer}, topic: cfg.Producer.Topic}, nil
+}
+
+// librdkafkaProducerAdapter bridges *kafka.Producer to the kafkaSender
+// interface so ExportSpans can be exercised with a stub sender in unit
+// tests without spinning up librdkafka. The adapter is intentionally
+// thin — it forwards to Produce verbatim.
+type librdkafkaProducerAdapter struct {
+	p *kafka.Producer
+}
+
+func (a *librdkafkaProducerAdapter) Send(msg *kafka.Message) error {
+	return a.p.Produce(msg, nil)
+}
+
+func (a *librdkafkaProducerAdapter) Flush(timeoutMs int) int {
+	return a.p.Flush(timeoutMs)
+}
+
+func (a *librdkafkaProducerAdapter) Close() {
+	a.p.Close()
 }

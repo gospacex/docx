@@ -73,9 +73,10 @@ func newJaegerExporter(cfg config.TracingConfig) (sdktrace.SpanExporter, error) 
 var _ = otlptrace.New
 
 func cloneHeaders(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return nil
-	}
+	// Always allocate so the caller can safely write into the returned
+	// map (e.g. merging an Authorization header below). Returning nil
+	// here previously caused a nil-map-write panic in newJaegerExporter
+	// whenever Auth.Username was set without Headers.
 	out := make(map[string]string, len(in))
 	for k, v := range in {
 		out[k] = v

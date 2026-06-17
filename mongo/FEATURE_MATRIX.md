@@ -1,104 +1,111 @@
 # MongoDB 客户端功能矩阵
 
-## MongoDB Go Driver 版本信息
+本文档仅描述 **当前实现并暴露** 给消费方的能力。driver 自身支持但未在
+`mongo.Config` 或 `Collection` / `Client` 包装层暴露的特性不计入此表 —— 如果
+你需要这些能力，请直接使用 [`go.mongodb.org/mongo-driver`](https://pkg.go.dev/go.mongodb.org/mongo-driver)
+原语，或通过 `Client.Database(name).Collection(name)` 取得原始 collection 后调用。
 
-- 当前支持版本：v1.x / v2.x（通过 `go.mongodb.org/mongo-driver`）
-- 最低 Server 版本：MongoDB 4.4（v2.7+ 将需要 4.4+）
-- Go 版本要求：Go 1.18+
+## 当前暴露的能力
 
-## 功能矩阵
+| 功能分类 | 功能点 | 配置项 | 说明 |
+|---|---|---|---|
+| **连接管理** | URI 连接 | `uri` | 通过 `options.Client().ApplyURI(cfg.URI)` 解析；支持单机、副本集、`mongodb+srv://` 等所有 driver URI 形式 |
+| **连接管理** | 懒加载 + 单例 | — | 首次 `MOC` / `MOS` / `MPC` / `MPS` 调用时建立连接；后续调用按 fingerprint 复用 |
+| **连接管理** | 连接池 | `max_pool_size` | 通过 `options.Client().SetMaxPoolSize` 设置；不设则用 driver 默认 |
+| **连接管理** | 优雅关闭 | — | `Client.Close(ctx)` / `Collection.Close(ctx)` 释放单例条目并断开 driver 客户端 |
+| **认证** | 用户名/密码 | `username`, `password` | 通过 `options.Credential` 设置，SCRAM-SHA-256 由 driver 默认协商 |
+| **超时控制** | 连接超时 | `connect_timeout_ms` | 通过 `options.Client().SetConnectTimeout` 设置 |
+| **健康检查** | Ping 健康检查 | — | `Client.HealthCheck(ctx)` / `Collection.HealthCheck(ctx)` |
+| **生命周期** | 配置指纹 | — | `Config.CacheFingerprint()` / `Config.ContentHash()` 用于构造 cache key |
+| **文档操作** | 读：`Find` / `FindOne` | — | `Collection.Find(ctx, filter)` 返回 `*mongo.Cursor`，`Collection.FindOne(ctx, filter)` 返回 `*mongo.SingleResult` |
+| **文档操作** | 写：`InsertOne` / `UpdateOne` / `DeleteOne` | — | 返回 driver 原生 result 类型 |
+| **文档操作** | 追踪包装 | — | `FindTrace` / `FindOneTrace` / `InsertTrace` / `UpdateTrace` / `DeleteTrace` 自动发出 OTel span |
+| **追踪** | `observability.InitTracing` 集成 | `tracing` 块 | 与根模块的 `TracingConfig` 同构；详见根 `README.md` |
 
-| 功能分类 | 功能点 | 实现状态 | 配置项 | 代码位置 |
-|---------|--------|---------|--------|----------|
-| **连接管理** | 单机连接 | ✅ 已实现 | `endpoints` | client.go:19-21 |
-| **连接管理** | 副本集连接 | ✅ 已实现 | `replica_set` | client.go:49-51 |
-| **连接管理** | 分片集群 | ⚠️ 待实现 | - | - |
-| **连接管理** | MongoDB SRV (DNS) | ⚠️ 待实现 | `mongodb+srv://` | - |
-| **连接管理** | 连接池 (Min/Max) | ✅ 已实现 | `pool_min_size`, `pool_max_size` | client.go:32-35 |
-| **连接管理** | 连接池 MaxIdleTime | ✅ 已实现 | `pool_max_idle_time_ms` | - |
-| **认证** | 用户名/密码认证 | ✅ 已实现 | `username`, `password` | client.go:69-72 (buildURI) |
-| **认证** | SCRAM-SHA-256 | ✅ 已实现 | (默认) | - |
-| **认证** | x.509 证书认证 | ⚠️ 待实现 | `tls_cert_file` | - |
-| **认证** | LDAP 认证 | ⚠️ 待实现 | - | - |
-| **认证** | AWS IAM 认证 | ⚠️ 待实现 | - | - |
-| **认证** | OIDC 认证 (K8s) | ⚠️ 待实现 | - | - |
-| **TLS** | TLS 基础支持 | ⚠️ 部分实现 | `tls.tls_enabled` | client.go:27-29 |
-| **TLS** | TLS CA 证书 | ⚠️ 待实现 | `tls.tls_ca_file` | - |
-| **TLS** | TLS 客户端证书 | ⚠️ 待实现 | `tls.tls_cert_file` | - |
-| **TLS** | TLS 密钥文件 | ⚠️ 待实现 | `tls.tls_key_file` | - |
-| **TLS** | InsecureSkipVerify | ⚠️ 待实现 | `tls.tls_insecure_skip_verify` | - |
-| **超时控制** | 连接超时 | ✅ 已实现 | `connect_timeout_ms` | client.go:38-40 |
-| **超时控制** | Socket 超时 | ✅ 已实现 | `socket_timeout_ms` | client.go:41-43 |
-| **超时控制** | Server 选择超时 | ✅ 已实现 | `server_selection_timeout_ms` | client.go:44-46 |
-| **超时控制** | 客户端操作超时 (CSOT) | ⚠️ 待实现 | `timeoutMS` | - |
-| **健康检查** | Ping 健康检查 | ✅ 已实现 | - | client.go:74-76 |
-| **生命周期** | 懒加载初始化 | ✅ 已实现 | - | client.go:54 |
-| **生命周期** | 优雅关闭 | ✅ 已实现 | - | client.go:78-83 |
-| **生命周期** | 批量关闭所有实例 | ✅ 已实现 | - | instance.go:54-66 |
-| **数据库操作** | 获取 Database | ✅ 已实现 | `database` | client.go:85-87 |
-| **数据库操作** | 获取 Collection | ✅ 已实现 | - | client.go:89-91 |
-| **数据库操作** | CRUD 操作 | ⚠️ 待实现 | - | (返回原生 client) |
-| **数据库操作** | 批量写操作 (BulkWrite) | ⚠️ 待实现 | - | - |
-| **数据库操作** | 聚合操作 | ⚠️ 待实现 | - | - |
-| **数据库操作** | 索引管理 | ⚠️ 待实现 | - | - |
-| **数据库操作** | Change Streams | ⚠️ 待实现 | - | - |
-| **数据库操作** | GridFS | ⚠️ 待实现 | - | - |
-| **特性** | 向量搜索 (Vector Search) | ⚠️ 待实现 | `bson.Vector` | - |
-| **特性** |Queryable Encryption | ⚠️ 待实现 | - | - |
-| **特性** | 搜索索引管理 | ⚠️ 待实现 | - | - |
-| **特性** | 智能负载管理 (IWM) | ⚠️ 待实现 | - | - |
-| **特性** | 压缩 (zstd) | ⚠️ 待实现 | - | - |
-| **日志** | SDAM 日志 | ⚠️ 待实现 | - | - |
-| **日志** | 命令日志 | ⚠️ 待实现 | - | - |
-| **日志** | 连接池事件 | ⚠️ 待实现 | - | - |
+## 当前未在 config 层暴露（out-of-scope）
 
-## 配置项汇总
+下列能力在底层 driver 中可用，但当前 SDK **没有** 在 `Config` 字段或
+`Collection` 方法中包装。如需使用，请走 driver 原生 API：
 
-| 配置项 | 类型 | 说明 | 状态 |
-|--------|------|------|------|
-| `endpoints` | []string | MongoDB 连接地址 | ✅ |
-| `database` | string | 默认数据库名 | ✅ |
-| `username` | string | 认证用户名 | ✅ |
-| `password` | string | 认证密码 | ✅ |
-| `auth_source` | string | 认证来源数据库 | ✅ |
-| `replica_set` | string | 副本集名称 | ✅ |
-| `pool_min_size` | int | 连接池最小连接数 | ✅ |
-| `pool_max_size` | int | 连接池最大连接数 | ✅ |
-| `pool_max_idle_time_ms` | int | 连接最大空闲时间(ms) | ✅ |
-| `connect_timeout_ms` | int | 连接超时(ms) | ✅ |
-| `socket_timeout_ms` | int | Socket 超时(ms) | ✅ |
-| `server_selection_timeout_ms` | int | Server 选择超时(ms) | ✅ |
-| `tls.tls_enabled` | bool | 是否启用 TLS | ⚠️ |
-| `tls.tls_ca_file` | string | CA 证书路径 | ❌ |
-| `tls.tls_cert_file` | string | 客户端证书路径 | ❌ |
-| `tls.tls_key_file` | string | 私钥路径 | ❌ |
-| `tls.tls_insecure_skip_verify` | bool | 跳过证书验证 | ❌ |
+- **复制集名称、副本集成员发现**：通过 URI 的 `replicaSet=...` 参数已隐式支持；SDK 不单独暴露
+- **分片集群**：通过 URI 已隐式支持；SDK 不单独暴露
+- **MongoDB SRV（DNS 发现）**：通过 `mongodb+srv://` URI 已支持；SDK 不单独暴露
+- **TLS 配置（CA / 客户端证书 / 私钥）**：driver 通过 `options.Client().SetTLSConfig` 支持；SDK 未封装
+- **x.509 / LDAP / AWS IAM / OIDC 认证**：driver 通过 `options.Credential.AuthMechanism` / `AuthSource` 支持；SDK 未封装
+- **连接池最小大小、最大空闲时间**：driver 通过 `SetMinPoolSize` / `SetMaxConnIdleTime` 支持；SDK 未封装
+- **Server 选择超时**：driver 通过 `SetServerSelectionTimeout` 支持；SDK 未封装
+- **客户端操作超时（CSOT `timeoutMS`）**：driver 原生支持 context 取消；SDK 未封装单独的 MS 级超时
+- **批量写入 BulkWrite**：driver 原生支持；SDK 未在 `Collection` 上包装
+- **聚合管道 Aggregation**：driver 原生支持；SDK 未包装
+- **索引管理**：driver 原生支持；SDK 未包装
+- **Change Streams**：driver 原生支持；SDK 未包装
+- **GridFS**：driver 原生支持；SDK 未包装
+- **向量搜索（`bson.Vector`）**：driver 原生支持；SDK 未包装
+- **Queryable Encryption / Search Index / IWM / zstd 压缩**：driver 原生支持；SDK 未包装
+- **SDAM / 命令 / 连接池事件日志**：driver 原生支持；SDK 未封装
 
 ## 接口定义
 
-### Instance 接口
+### 入口点
+
+| 函数 | 用途 | 返回 |
+|---|---|---|
+| `MOC(ctx, cfg)` | 从 `*Config` 获取 `*Client` | 单例 `*Client` 或 error |
+| `MOS(ctx, cfg)` | 从 `*Config` 获取 `*Collection` | 单例 `*Collection` 或 error |
+| `MPC(ctx, path)` | 从 YAML 路径获取 `*Client` | 单例 `*Client` 或 error |
+| `MPS(ctx, path)` | 从 YAML 路径获取 `*Collection` | 单例 `*Collection` 或 error |
+
+### `Client`
+
 ```go
-type Instance interface {
-    HealthCheck(ctx context.Context) error
-    Close() error
-}
+type Client struct { /* unexported */ }
+func (c *Client) Database(name string) *mongo.Database
+func (c *Client) Collection(dbName, collName string) *Collection
+func (c *Client) HealthCheck(ctx context.Context) error
+func (c *Client) Close(ctx context.Context) error
+func (c *Client) Config() *Config
 ```
 
-### Provider 接口
+### `Collection`
+
 ```go
-type Provider interface {
-    Name() string
-    Type() TypeID
-    Build(instanceName string, cfg map[string]any) (Instance, error)
-    HealthCheck(ctx context.Context) error
-    Close() error
-}
+type Collection struct { Name string }
+func (c *Collection) Find(ctx, filter) (*mongo.Cursor, error)
+func (c *Collection) FindOne(ctx, filter) *mongo.SingleResult
+func (c *Collection) InsertOne(ctx, doc) (*mongo.InsertOneResult, error)
+func (c *Collection) UpdateOne(ctx, filter, update) (*mongo.UpdateResult, error)
+func (c *Collection) DeleteOne(ctx, filter) (*mongo.DeleteResult, error)
+func (c *Collection) HealthCheck(ctx) error
+func (c *Collection) Close(ctx) error
 ```
 
-## 状态说明
+### Traced wrappers
 
-| 状态 | 说明 |
-|------|------|
-| ✅ 已实现 | 功能完整可用 |
-| ⚠️ 待实现 | 框架已预留，需扩展实现 |
-| ❌ 未实现 | 完全未支持 |
+```go
+func FindTrace(ctx, coll, filter) (*mongo.Cursor, error)
+func FindOneTrace(ctx, coll, filter) *mongo.SingleResult
+func InsertTrace(ctx, coll, doc) (*mongo.InsertOneResult, error)
+func UpdateTrace(ctx, coll, filter, update) (*mongo.UpdateResult, error)
+func DeleteTrace(ctx, coll, filter) (*mongo.DeleteResult, error)
+```
+
+## 配置项汇总（仅暴露字段）
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `uri` | string | MongoDB 连接 URI；driver 解析所有标准 URI 形式 |
+| `database` | string | 默认数据库名（`MOS` / `MPS` 必填） |
+| `collection` | string | 默认集合名（`MOS` / `MPS` 必填） |
+| `username` | string | 用户名（与 `password` 同时设置时启用 SCRAM） |
+| `password` | string | 密码 |
+| `connect_timeout_ms` | int | 连接超时，毫秒 |
+| `max_pool_size` | int | 连接池最大连接数 |
+| `tracing` | block | `TracingConfig` 块，与根模块同构 |
+
+## 依赖版本
+
+| 库 | 版本 |
+|---|---|
+| `go.mongodb.org/mongo-driver` | v1.17.9 |
+| `github.com/gospacex/hubx/cache/docx` | `0.2.0-dev` |
+| Go | `1.26.2` |

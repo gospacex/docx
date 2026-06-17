@@ -1,0 +1,30 @@
+# dbx schema — single-instance MySQL pointed at legoB min profile.
+# The top-level `tracing:` block is consumed by dbx via fileWrapper
+# (config/loader.go:14-25) but dbsql.ExtractTracingAndApply is a documented
+# no-op, so TestMain also reads it via config.LoadMySQL to construct the
+# OTel TracerProvider three-step explicitly.
+#
+# Field names verified against:
+#   dbx/config/config.go         (MySQLConfig / BaseDBConfig)
+#   dbx/config/tracing.go        (TracingConfig)
+#   dbx/config/loader.go:14-25   (fileWrapper)
+
+mysql:
+  host: localhost
+  port: 3306
+  username: testuser
+  password: testpass
+  database: testdb
+  pool:
+    max_open_conns: 20
+    max_idle_conns: 5
+    conn_max_lifetime: 1800
+
+tracing:
+  enabled: true
+  service: examples-dbxwirejaeger
+  exporter: jaeger
+  endpoint: localhost:4318
+  protocol: http
+  sampler_type: always_on
+  sampler_ratio: 1.0

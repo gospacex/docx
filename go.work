@@ -4,6 +4,8 @@ use (
 	.
 	./couchbase
 	./mongo
+	./hubx/mongox
+	./hubx/couchbasex
 	./example/01-jaeger
 	./example/02-kafka-topic
 	./example/03-redis-stream

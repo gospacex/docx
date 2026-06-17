@@ -1,0 +1,54 @@
+# PlatformBase configuration.
+#
+# The Viper-backed ConfigLoader reads from this file and exposes
+# `providers.<providerName>.<instanceName>.config` blocks. Because Viper
+# uses `.` as the path separator, a provider whose canonical name itself
+# contains dots (e.g. `cachex.redis`) must be split into nested YAML keys
+# so the loader can navigate to the `config:` block.
+#
+# Example: provider `cachex.redis`, instance `default` →
+#   providers:
+#     cachex:
+#       redis:
+#         default:
+#           config: { ... }
+#
+# Drivers' Config schemas are strict (ErrorUnused and sometimes ErrorUnset);
+# every field present in the driver's Config struct must be specified
+# explicitly here, even if zero. The otel.tracer and otel.meter blocks use
+# `enabled: false` so they build without any exporter — handy for CI smoke
+# tests that have no real backends.
+providers:
+  cachex:
+    redis:
+      default:
+        config:
+          addrs: ["localhost:6379"]
+          db: 0
+  dbx:
+    mysql:
+      default:
+        config:
+          dsn: "${MYSQL_DSN:-root:pass@tcp(localhost:3306)/db}"
+          max_open_conns: 0
+          max_idle_conns: 0
+          # time.Duration fields take integer nanoseconds via the YAML/mapstructure
+          # pipeline; "0s" is rejected because viper doesn't auto-decode duration
+          # strings. Pass 0 (== 0ns) explicitly.
+          conn_max_lifetime: 0
+  otel:
+    tracer:
+      default:
+        config:
+          enabled: false
+          type: ""
+    meter:
+      default:
+        config:
+          enabled: false
+          type: ""
+          push_interval: 0
+          prometheus_port: 0
+          prometheus_path: ""
+          kafka_topic: ""
+          redis_stream: ""

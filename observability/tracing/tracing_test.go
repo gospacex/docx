@@ -1,11 +1,8 @@
 package tracing
 
 import (
-	"context"
 	"strings"
 	"testing"
-
-	"github.com/redis/go-redis/v9"
 
 	"github.com/gospacex/hubx/cache/docx/config"
 )
@@ -52,18 +49,5 @@ func TestNewExporter_UnknownExporter(t *testing.T) {
 	expected := `tracing: unknown exporter "unknown_exporter"`
 	if !strings.Contains(err.Error(), expected) {
 		t.Fatalf("expected error containing %q, got: %v", expected, err)
-	}
-}
-
-func TestRedisStreamExporter_Shutdown_Idempotent(t *testing.T) {
-	client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
-	exp := &redisStreamExporter{client: client, stream: "test-stream"}
-
-	ctx := context.Background()
-	if err := exp.Shutdown(ctx); err != nil {
-		t.Fatalf("first Shutdown should not error: %v", err)
-	}
-	if err := exp.Shutdown(ctx); err != nil {
-		t.Fatalf("second Shutdown (idempotent) should not error: %v", err)
 	}
 }

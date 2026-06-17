@@ -86,11 +86,11 @@ func (c *Config) CacheFingerprint() (string, error) {
 	return fp, nil
 }
 
-func (c *Config) ComputeContentHash() string {
-	fp, _ := c.CacheFingerprint()
-	return fp
-}
-
+// ContentHash is the cached fingerprint of the last CacheFingerprint call.
+// Errors from CacheFingerprint are swallowed here so callers can use the
+// method for cheap equality checks without surfacing fingerprint errors;
+// callers that need to surface the error should call CacheFingerprint
+// directly.
 func (c *Config) ContentHash() string {
 	fp, _ := c.CacheFingerprint()
 	return fp
